@@ -1,0 +1,132 @@
+from __future__ import annotations
+
+import logging
+from dataclasses import asdict, dataclass, field
+from urllib.parse import urljoin, urlparse
+
+from linkedin.browser.nav import goto_page
+from linkedin.exceptions import SkipProfile
+from linkedin.url_utils import public_id_to_url, url_to_public_id
+
+logger = logging.getLogger(__name__)
+
+_POST_LINK_SELECTORS = (
+    'a[href*="/feed/update/"]',
+    'a[href*="/posts/"]',
+    'a[href*="/pulse/"]',
+)
+
+
+@dataclass(slots=True)
+class CommentOriginResult:
+    profile_url: str
+    public_identifier: str
+    source_url: str | None = None
+    post_urls: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+    def as_payload(self) -> dict:
+        return asdict(self)
+
+
+def candidate_activity_urls(profile_url: str) -> list[str]:
+    public_identifier = url_to_public_id(profile_url)
+    if not public_identifier:
+        raise ValueError("profile_url must point to a LinkedIn /in/ profile")
+
+    base_profile_url = public_id_to_url(public_identifier)
+    return [
+        f"{base_profile_url}recent-activity/comments/",
+        f"{base_profile_url}recent-activity/all/",
+        f"{base_profile_url}recent-activity/posts/",
+    ]
+
+
+def _normalize_post_url(base_url: str, href: str) -> str | None:
+    if not href:
+        return None
+
+    absolute = urljoin(base_url, href.strip())
+    parsed = urlparse(absolute)
+    if "linkedin.com" not in parsed.netloc:
+        return None
+
+    clean = parsed._replace(query="", fragment="").geturl()
+    if any(
+        marker in clean
+        for marker in ("/feed/update/", "/posts/", "/pulse/")
+    ):
+        if clean.startswith(
+            (
+                "https://www.linkedin.com/feed/update/",
+                "https://www.linkedin.com/posts/",
+                "https://www.linkedin.com/pulse/",
+            )
+        ) and not clean.endswith("/"):
+            clean += "/"
+        return clean
+    return None
+
+
+def extract_original_post_urls(page, limit: int = 50) -> list[str]:
+    seen: set[str] = set()
+    urls: list[str] = []
+
+    selector = ", ".join(_POST_LINK_SELECTORS)
+    for locator in page.locator(selector).all():
+        href = locator.get_attribute("href") or ""
+        clean = _normalize_post_url(page.url, href)
+        if not clean or clean in seen:
+            continue
+        seen.add(clean)
+        urls.append(clean)
+        if len(urls) >= limit:
+            break
+
+    return urls
+
+
+def collect_comment_origins(
+    session,
+    profile_url: str,
+    limit: int = 50,
+) -> CommentOriginResult:
+    session.ensure_browser()
+
+    public_identifier = url_to_public_id(profile_url)
+    if not public_identifier:
+        raise ValueError("profile_url must point to a LinkedIn /in/ profile")
+
+    result = CommentOriginResult(
+        profile_url=profile_url,
+        public_identifier=public_identifier,
+    )
+
+    for activity_url in candidate_activity_urls(profile_url):
+        try:
+            goto_page(
+                session,
+                action=lambda: session.page.goto(
+                    activity_url,
+                    wait_until="domcontentloaded",
+                ),
+                expected_url_pattern="/recent-activity",
+                error_message="Failed to open LinkedIn activity page",
+            )
+            session.wait(1, 2)
+        except SkipProfile as exc:
+            result.warnings.append(str(exc))
+            continue
+        except RuntimeError as exc:
+            result.warnings.append(str(exc))
+            continue
+
+        urls = extract_original_post_urls(session.page, limit=limit)
+        if urls:
+            result.source_url = session.page.url
+            result.post_urls = urls
+            return result
+
+        result.warnings.append(f"No post links found on {activity_url}")
+
+    return result

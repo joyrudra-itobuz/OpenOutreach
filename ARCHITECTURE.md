@@ -9,6 +9,7 @@ Detailed module documentation for OpenOutreach. See `CLAUDE.md` for rules and qu
 ### `rundaemon` management command (`management/commands/rundaemon.py`)
 
 Startup sequence:
+
 1. **Configure logging** — DEBUG level, suppresses noisy third-party loggers (urllib3, httpx, pydantic_ai, openai, playwright, etc.).
 2. **Ensure DB** — `migrate --no-input` + `setup_crm` (idempotent).
 3. **Onboard** — checks `missing_keys()`; if incomplete: uses `--onboard <config.json>` (non-interactive), falls back to interactive wizard (TTY), or exits with clear error (no TTY).
@@ -24,10 +25,12 @@ Docker `start` script handles only Xvfb/VNC setup, then `exec python manage.py r
 - `onboard` — standalone onboarding (interactive or `--non-interactive` with `--config-file` / individual flags).
 - `setup_crm` — idempotent CRM bootstrap (default Site).
 - `add_seeds` — add seed LinkedIn profile URLs to a campaign.
+- `profile_comment_origins` — scrape recent activity comment links for a LinkedIn profile URL and POST the normalized result to a webhook.
 
 ## Onboarding (`onboarding.py`)
 
 `OnboardConfig` — pure dataclass with all onboarding fields. Two constructors:
+
 - `OnboardConfig.from_json(path)` — from JSON file (cloud / non-interactive).
 - `collect_from_wizard()` — interactive questionary wizard (needs TTY), only asks for `missing_keys()`.
 
@@ -120,8 +123,9 @@ Three apps in `INSTALLED_APPS`:
 - **`exceptions.py`** — `AuthenticationError`, `TerminalStateError`, `SkipProfile`, `ReachedConnectionLimit`.
 - **`onboarding.py`** — Interactive setup.
 - **`agents/follow_up.py`** — Follow-up agent. Single LLM call with structured output (`FollowUpDecision`). Conversation is read in Python and injected into the prompt. No tool-calling loop.
-- **`actions/`** — `connect.py` (`send_connection_request`), `status.py` (`get_connection_status`), `message.py` (`send_raw_message`), `profile.py` (profile extraction), `search.py` (LinkedIn search), `conversations.py` (`get_conversation`).
+- **`actions/`** — `connect.py` (`send_connection_request`), `status.py` (`get_connection_status`), `message.py` (`send_raw_message`), `profile.py` (profile extraction), `search.py` (LinkedIn search), `conversations.py` (`get_conversation`), `comment_origins.py` (recent-activity comment link extraction).
 - **`api/client.py`** — `PlaywrightLinkedinAPI`: browser-context fetch (runs JS `fetch()` inside Playwright page for authentic headers). `timeout_ms` constructor param (default 30s). `get_profile()` with tenacity retry.
+- **`api/webhooks.py`** — JSON webhook POST helper used by `profile_comment_origins`.
 - **`api/voyager.py`** — `LinkedInProfile` dataclass (url, urn, full_name, headline, positions, educations, country_code, supported_locales, connection_distance/degree). `parse_linkedin_voyager_response()`.
 - **`api/newsletter.py`** — `subscribe_to_newsletter()` via Brevo form, `ensure_newsletter_subscription()`. No config parsing — subscribe_newsletter is a BooleanField.
 - **`api/messaging/send.py`** — Send messages via Voyager messaging API.
@@ -134,7 +138,6 @@ Three apps in `INSTALLED_APPS`:
 - **`management/setup_crm.py`** — Idempotent CRM bootstrap (Site creation).
 - **`admin.py`** — Django Admin: SiteConfig, Campaign, LinkedInProfile, SearchKeyword, ActionLog, Task, ChatMessage.
 - **`django_settings.py`** — Django settings (SQLite at `data/db.sqlite3`). Apps: crm, chat, linkedin.
-
 
 ## Configuration
 
