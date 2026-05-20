@@ -86,6 +86,38 @@ def extract_original_post_urls(page, limit: int = 50) -> list[str]:
     return urls
 
 
+def _scroll_and_collect(session, limit: int) -> list[str]:
+    """Scroll the page iteratively to trigger LinkedIn lazy-loading, collecting
+    post URLs as they appear in the DOM. Returns when ``limit`` URLs are found
+    or three consecutive scrolls yield nothing new."""
+    seen: set[str] = set()
+    urls: list[str] = []
+    no_new_count = 0
+    max_no_new = 3
+    scroll_pause = 2.5  # seconds between scrolls
+
+    while len(urls) < limit and no_new_count < max_no_new:
+        batch = extract_original_post_urls(session.page, limit=limit)
+        new = [u for u in batch if u not in seen]
+        if new:
+            seen.update(new)
+            urls.extend(new)
+            no_new_count = 0
+        else:
+            no_new_count += 1
+
+        if len(urls) >= limit:
+            break
+
+        # Scroll down to trigger the next batch
+        session.page.evaluate("window.scrollBy(0, window.innerHeight * 2)")
+        session.page.wait_for_load_state("domcontentloaded")
+        import time
+        time.sleep(scroll_pause)
+
+    return urls[:limit]
+
+
 def collect_comment_origins(
     session,
     profile_url: str,
@@ -113,7 +145,8 @@ def collect_comment_origins(
                 expected_url_pattern="/recent-activity",
                 error_message="Failed to open LinkedIn activity page",
             )
-            session.wait(1, 2)
+            # Give the JS feed time to render before the first selector pass
+            session.wait(3, 4)
         except SkipProfile as exc:
             result.warnings.append(str(exc))
             continue
@@ -121,7 +154,7 @@ def collect_comment_origins(
             result.warnings.append(str(exc))
             continue
 
-        urls = extract_original_post_urls(session.page, limit=limit)
+        urls = _scroll_and_collect(session, limit=limit)
         if urls:
             result.source_url = session.page.url
             result.post_urls = urls
