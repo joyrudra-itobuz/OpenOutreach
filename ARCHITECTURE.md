@@ -25,7 +25,8 @@ Docker `start` script handles only Xvfb/VNC setup, then `exec python manage.py r
 - `onboard` — standalone onboarding (interactive or `--non-interactive` with `--config-file` / individual flags).
 - `setup_crm` — idempotent CRM bootstrap (default Site).
 - `add_seeds` — add seed LinkedIn profile URLs to a campaign.
-- `profile_comment_origins` — scrape recent activity comment links for a LinkedIn profile URL and POST the normalized result to a webhook.
+- `profile_comment_origins` — scrape recent activity comment links for a LinkedIn profile URL and POST the normalized result to a webhook. Extractor supports both direct post anchors (`/feed/update`, `/posts`, `/pulse`) and feed cards exposing only `data-urn`; scrolling also handles LinkedIn finite-scroll "Show more results" button.
+- `profile_comment_intents` — scrape commented posts, run LLM business-intent classification (`YES`/`NO`, lead level, reason, suggested reply), optionally filter to intent-positive entries, and POST either JSON or Google Chat text format.
 
 ## Onboarding (`onboarding.py`)
 
@@ -123,9 +124,9 @@ Three apps in `INSTALLED_APPS`:
 - **`exceptions.py`** — `AuthenticationError`, `TerminalStateError`, `SkipProfile`, `ReachedConnectionLimit`.
 - **`onboarding.py`** — Interactive setup.
 - **`agents/follow_up.py`** — Follow-up agent. Single LLM call with structured output (`FollowUpDecision`). Conversation is read in Python and injected into the prompt. No tool-calling loop.
-- **`actions/`** — `connect.py` (`send_connection_request`), `status.py` (`get_connection_status`), `message.py` (`send_raw_message`), `profile.py` (profile extraction), `search.py` (LinkedIn search), `conversations.py` (`get_conversation`), `comment_origins.py` (recent-activity comment link extraction).
+- **`actions/`** — `connect.py` (`send_connection_request`), `status.py` (`get_connection_status`), `message.py` (`send_raw_message`), `profile.py` (profile extraction), `search.py` (LinkedIn search), `conversations.py` (`get_conversation`), `comment_origins.py` (recent-activity comment link extraction from both anchor URLs and `data-urn` feed cards).
 - **`api/client.py`** — `PlaywrightLinkedinAPI`: browser-context fetch (runs JS `fetch()` inside Playwright page for authentic headers). `timeout_ms` constructor param (default 30s). `get_profile()` with tenacity retry.
-- **`api/webhooks.py`** — JSON webhook POST helper used by `profile_comment_origins`.
+- **`api/webhooks.py`** — JSON webhook POST helper used by `profile_comment_origins` and `profile_comment_intents`.
 - **`api/voyager.py`** — `LinkedInProfile` dataclass (url, urn, full_name, headline, positions, educations, country_code, supported_locales, connection_distance/degree). `parse_linkedin_voyager_response()`.
 - **`api/newsletter.py`** — `subscribe_to_newsletter()` via Brevo form, `ensure_newsletter_subscription()`. No config parsing — subscribe_newsletter is a BooleanField.
 - **`api/messaging/send.py`** — Send messages via Voyager messaging API.

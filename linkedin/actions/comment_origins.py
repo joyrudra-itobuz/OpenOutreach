@@ -16,6 +16,16 @@ _POST_LINK_SELECTORS = (
     'a[href*="/pulse/"]',
 )
 
+_POST_URN_SELECTORS = (
+    ".feed-shared-update-v2[data-urn]",
+    '[data-view-name="feed-full-update"] [data-urn]',
+)
+
+_SHOW_MORE_SELECTORS = (
+    ".scaffold-finite-scroll__load-button",
+    'button:has-text("Show more results")',
+)
+
 
 @dataclass(slots=True)
 class CommentOriginResult:
@@ -68,12 +78,26 @@ def _normalize_post_url(base_url: str, href: str) -> str | None:
     return None
 
 
+def _normalize_post_urn(urn: str) -> str | None:
+    if not urn:
+        return None
+
+    clean_urn = urn.strip()
+    if not clean_urn.startswith("urn:li:"):
+        return None
+
+    if clean_urn.startswith(("urn:li:activity:", "urn:li:ugcPost:")):
+        return f"https://www.linkedin.com/feed/update/{clean_urn}/"
+
+    return None
+
+
 def extract_original_post_urls(page, limit: int = 50) -> list[str]:
     seen: set[str] = set()
     urls: list[str] = []
 
-    selector = ", ".join(_POST_LINK_SELECTORS)
-    for locator in page.locator(selector).all():
+    link_selector = ", ".join(_POST_LINK_SELECTORS)
+    for locator in page.locator(link_selector).all():
         href = locator.get_attribute("href") or ""
         clean = _normalize_post_url(page.url, href)
         if not clean or clean in seen:
@@ -83,7 +107,32 @@ def extract_original_post_urls(page, limit: int = 50) -> list[str]:
         if len(urls) >= limit:
             break
 
+    if len(urls) < limit:
+        urn_selector = ", ".join(_POST_URN_SELECTORS)
+        for locator in page.locator(urn_selector).all():
+            urn = locator.get_attribute("data-urn") or ""
+            clean = _normalize_post_urn(urn)
+            if not clean or clean in seen:
+                continue
+            seen.add(clean)
+            urls.append(clean)
+            if len(urls) >= limit:
+                break
+
     return urls
+
+
+def _try_click_show_more(page) -> bool:
+    for selector in _SHOW_MORE_SELECTORS:
+        button = page.locator(selector).first
+        if button.count() <= 0:
+            continue
+        if not button.is_visible():
+            continue
+        button.click()
+        page.wait_for_load_state("domcontentloaded")
+        return True
+    return False
 
 
 def _scroll_and_collect(session, limit: int) -> list[str]:
@@ -109,9 +158,17 @@ def _scroll_and_collect(session, limit: int) -> list[str]:
         if len(urls) >= limit:
             break
 
-        # Scroll down to trigger the next batch
-        session.page.evaluate("window.scrollBy(0, window.innerHeight * 2)")
-        session.page.wait_for_load_state("domcontentloaded")
+        # LinkedIn sometimes switches from infinite-scroll to a finite
+        # "Show more results" button after initial batches.
+        clicked_show_more = False
+        try:
+            clicked_show_more = _try_click_show_more(session.page)
+        except Exception:
+            clicked_show_more = False
+
+        if not clicked_show_more:
+            session.page.evaluate("window.scrollBy(0, window.innerHeight * 2)")
+            session.page.wait_for_load_state("domcontentloaded")
         import time
         time.sleep(scroll_pause)
 

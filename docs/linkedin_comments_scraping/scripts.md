@@ -170,6 +170,93 @@ docker compose -f local.yml exec -T app sh -lc \
 
 ---
 
+## `profile_comment_intents`
+
+**File**: `linkedin/management/commands/profile_comment_intents.py`
+
+Collects commented post URLs, opens each post, classifies whether it has
+**business intent** (YES/NO), assigns a lead level (High/Medium/Low), and
+generates a suggested reply.
+
+Use this when you only want actionable outreach opportunities.
+
+### Usage
+
+```bash
+python manage.py profile_comment_intents \
+  --profile-url "https://www.linkedin.com/in/some-person/" \
+  [--limit 20] \
+  [--business-only] \
+  [--webhook-format json|google_chat] \
+  [--webhook-url "https://..."] \
+  [--dry-run] \
+  [--handle myuser]
+```
+
+### Arguments
+
+| Argument | Required | Default | Description |
+|:---------|:---------|:--------|:------------|
+| `--profile-url` | ✅ | — | Target LinkedIn profile URL (`/in/…`) |
+| `--limit` | ❌ | `20` | Max posts to analyze |
+| `--business-only` | ❌ | `false` | Keep only posts where intent is `YES` |
+| `--webhook-format` | ❌ | `json` | Send raw JSON payload or Google Chat `text` |
+| `--webhook-url` | ❌ | env fallback | Explicit webhook endpoint |
+| `--dry-run` | ❌ | `false` | Print JSON payload to stdout, skip webhook |
+| `--handle` | ❌ | first active profile | Django username for login account |
+
+Webhook URL fallback order:
+
+1. `--webhook-url`
+2. `COMMENT_INTENT_WEBHOOK_URL`
+3. `OPENCLAW_WEBHOOK_URL`
+
+### Output (stdout)
+
+```json
+{
+  "type": "profile_comment_intents",
+  "collected_at": "2026-05-20T10:00:00+00:00",
+  "profile_url": "https://www.linkedin.com/in/some-person/",
+  "public_identifier": "some-person",
+  "source_url": "https://www.linkedin.com/in/some-person/recent-activity/comments/",
+  "posts": [
+    {
+      "post_number": 9,
+      "author": "Siddharth Patel",
+      "intent": "NO",
+      "lead": "Medium",
+      "url": "https://www.linkedin.com/feed/update/urn:li:activity:7462396522836451328/",
+      "reason": "Recruiting freelancers rather than seeking an agency partner.",
+      "suggested_reply": "Thanks for sharing your requirement."
+    }
+  ],
+  "warnings": []
+}
+```
+
+### Docker examples
+
+```bash
+# Dry run with only intent-positive posts
+docker compose -f local.yml exec -T app sh -lc \
+  'DISPLAY=:99 python manage.py profile_comment_intents \
+     --profile-url "https://www.linkedin.com/in/some-person/recent-activity/comments/" \
+     --limit 10 \
+     --business-only \
+     --dry-run'
+
+# Send formatted text to Google Chat from env (no secret on CLI)
+docker compose -f local.yml exec -T app sh -lc \
+  'DISPLAY=:99 python manage.py profile_comment_intents \
+     --profile-url "https://www.linkedin.com/in/some-person/recent-activity/comments/" \
+     --limit 10 \
+     --business-only \
+     --webhook-format google_chat'
+```
+
+---
+
 ## Choosing between the two commands
 
 | Use case | Command |
@@ -177,4 +264,5 @@ docker compose -f local.yml exec -T app sh -lc \
 | Just want a list of post URLs | `profile_comment_origins` |
 | Want post text + images for content analysis | `profile_comment_posts` |
 | Feeding into an LLM for summarisation | `profile_comment_posts` |
+| Want only business-intent opportunities + suggested replies | `profile_comment_intents` |
 | Quick audit / check who a person engages with | `profile_comment_origins` |
