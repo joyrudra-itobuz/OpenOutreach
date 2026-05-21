@@ -20,7 +20,10 @@ class Command(BaseCommand):
         parser.add_argument(
             "--profile-url",
             default=None,
-            help="LinkedIn /in/ profile URL to inspect (prompted if omitted)",
+            help=(
+                "LinkedIn /in/ profile or /company/ page URL to inspect "
+                "(prompted if omitted)"
+            ),
         )
         parser.add_argument(
             "--webhook-url",

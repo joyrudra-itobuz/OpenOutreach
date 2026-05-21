@@ -6,7 +6,6 @@ from urllib.parse import urljoin, urlparse
 
 from linkedin.browser.nav import goto_page
 from linkedin.exceptions import SkipProfile
-from linkedin.url_utils import public_id_to_url, url_to_public_id
 
 logger = logging.getLogger(__name__)
 
@@ -40,11 +39,16 @@ class CommentOriginResult:
 
 
 def candidate_activity_urls(profile_url: str) -> list[str]:
-    public_identifier = url_to_public_id(profile_url)
-    if not public_identifier:
-        raise ValueError("profile_url must point to a LinkedIn /in/ profile")
+    parsed = urlparse((profile_url or "").strip())
+    path_parts = [part for part in parsed.path.split("/") if part]
+    if len(path_parts) < 2 or path_parts[0] not in {"in", "company"}:
+        raise ValueError(
+            "profile_url must point to a LinkedIn /in/ profile or /company/ page"
+        )
 
-    base_profile_url = public_id_to_url(public_identifier)
+    base_profile_url = (
+        f"https://www.linkedin.com/{path_parts[0]}/{path_parts[1]}/"
+    )
     return [
         f"{base_profile_url}recent-activity/comments/",
         f"{base_profile_url}recent-activity/all/",
@@ -182,9 +186,13 @@ def collect_comment_origins(
 ) -> CommentOriginResult:
     session.ensure_browser()
 
-    public_identifier = url_to_public_id(profile_url)
-    if not public_identifier:
-        raise ValueError("profile_url must point to a LinkedIn /in/ profile")
+    parsed = urlparse((profile_url or "").strip())
+    path_parts = [part for part in parsed.path.split("/") if part]
+    if len(path_parts) < 2 or path_parts[0] not in {"in", "company"}:
+        raise ValueError(
+            "profile_url must point to a LinkedIn /in/ profile or /company/ page"
+        )
+    public_identifier = path_parts[1]
 
     result = CommentOriginResult(
         profile_url=profile_url,

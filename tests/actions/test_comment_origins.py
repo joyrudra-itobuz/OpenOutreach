@@ -83,6 +83,17 @@ def test_candidate_activity_urls():
     ]
 
 
+def test_candidate_activity_urls_for_company_page():
+    urls = candidate_activity_urls(
+        "https://www.linkedin.com/company/lollypop-studio/?trk=foo",
+    )
+    assert urls == [
+        "https://www.linkedin.com/company/lollypop-studio/recent-activity/comments/",
+        "https://www.linkedin.com/company/lollypop-studio/recent-activity/all/",
+        "https://www.linkedin.com/company/lollypop-studio/recent-activity/posts/",
+    ]
+
+
 def test_normalize_post_url_removes_tracking_and_keeps_linkedin_posts():
     url = _normalize_post_url(
         "https://www.linkedin.com/in/jane-doe/recent-activity/comments/",
@@ -164,4 +175,36 @@ def test_collect_comment_origins_returns_payload(monkeypatch):
     assert result.public_identifier == "jane-doe"
     assert result.post_urls == [
         "https://www.linkedin.com/feed/update/urn:li:activity:42/",
+    ]
+
+
+def test_collect_comment_origins_company_page(monkeypatch):
+    page = _FakePage(
+        "https://www.linkedin.com/company/lollypop-studio/recent-activity/all/",
+        ["/feed/update/urn:li:activity:77/?trk=foo"],
+    )
+    session = _FakeSession(page)
+
+    def fake_goto_page(
+        session,
+        action,
+        expected_url_pattern,
+        timeout=None,
+        error_message="",
+    ):
+        action()
+
+    monkeypatch.setattr(
+        "linkedin.actions.comment_origins.goto_page",
+        fake_goto_page,
+    )
+
+    result = collect_comment_origins(
+        session,
+        "https://www.linkedin.com/company/lollypop-studio/",
+        limit=5,
+    )
+    assert result.public_identifier == "lollypop-studio"
+    assert result.post_urls == [
+        "https://www.linkedin.com/feed/update/urn:li:activity:77/",
     ]
