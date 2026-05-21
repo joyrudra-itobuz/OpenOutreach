@@ -52,6 +52,14 @@ COMPLY_LOCATORS = [
 COMPLY_PROBE_TIMEOUT_MS = 5000
 
 
+def _is_feed_url(url: str) -> bool:
+    return "linkedin.com/feed" in (url or "")
+
+
+def _is_checkpoint_url(url: str) -> bool:
+    return "/checkpoint/" in (url or "") or "/challenge/" in (url or "")
+
+
 def dismiss_comply_gate(page, timeout_ms: int = COMPLY_PROBE_TIMEOUT_MS) -> bool:
     """Click LinkedIn's 'Agree to comply' interstitial if present. Return True if clicked."""
     for factory in COMPLY_LOCATORS:
@@ -71,19 +79,67 @@ def playwright_login(session: "AccountSession"):
     lp = session.linkedin_profile
     logger.info(colored("Fresh login sequence starting", "cyan") + f" for {session}")
 
+    page.goto(LINKEDIN_LOGIN_URL)
+    dismiss_comply_gate(page)
+
+    # LinkedIn can immediately redirect to feed when the account is already
+    # authenticated; in that case there are no login form fields to fill.
+    if _is_feed_url(page.url):
+        logger.info("Already on feed after login navigation; skipping form fill")
+        return
+
+    if _is_checkpoint_url(page.url):
+        raise RuntimeError(
+            "LinkedIn checkpoint/challenge detected during login. "
+            "Complete verification in the browser and retry. "
+            f"Current URL: {page.url}"
+        )
+
     goto_page(
         session,
-        action=lambda: page.goto(LINKEDIN_LOGIN_URL),
+        action=lambda: None,
         expected_url_pattern="/login",
         error_message="Failed to load login page",
     )
 
-    human_type(resolve_locator(page, EMAIL_LOCATORS), lp.linkedin_username)
-    session.wait()
-    human_type(resolve_locator(page, PASSWORD_LOCATORS), lp.linkedin_password)
+    try:
+        email_input = resolve_locator(page, EMAIL_LOCATORS)
+    except RuntimeError:
+        if _is_feed_url(page.url):
+            logger.info("Redirected to feed before email input; treating as authenticated")
+            return
+        raise
+
+    human_type(email_input, lp.linkedin_username)
     session.wait()
 
-    submit = resolve_locator(page, SUBMIT_LOCATORS)
+    if _is_feed_url(page.url):
+        logger.info("Redirected to feed after email input; skipping password step")
+        return
+
+    try:
+        password_input = resolve_locator(page, PASSWORD_LOCATORS)
+    except RuntimeError:
+        if _is_feed_url(page.url):
+            logger.info("Redirected to feed before password input; treating as authenticated")
+            return
+        raise
+
+    human_type(password_input, lp.linkedin_password)
+    session.wait()
+
+    if _is_feed_url(page.url):
+        logger.info("Redirected to feed after password input; skipping submit")
+        return
+
+    try:
+        submit = resolve_locator(page, SUBMIT_LOCATORS)
+    except RuntimeError:
+        if _is_feed_url(page.url):
+            logger.info("Redirected to feed before submit; treating as authenticated")
+            return
+        raise
+
     submit.click()
     dismiss_comply_gate(page)
     goto_page(

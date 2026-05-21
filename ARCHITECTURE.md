@@ -25,8 +25,8 @@ Docker `start` script handles only Xvfb/VNC setup, then `exec python manage.py r
 - `onboard` — standalone onboarding (interactive or `--non-interactive` with `--config-file` / individual flags).
 - `setup_crm` — idempotent CRM bootstrap (default Site).
 - `add_seeds` — add seed LinkedIn profile URLs to a campaign.
-- `profile_comment_origins` — scrape recent activity comment links for a LinkedIn profile URL and POST the normalized result to a webhook. Extractor supports both direct post anchors (`/feed/update`, `/posts`, `/pulse`) and feed cards exposing only `data-urn`; scrolling also handles LinkedIn finite-scroll "Show more results" button.
-- `profile_comment_intents` — scrape commented posts, run LLM business-intent classification (`YES`/`NO`, lead level, reason, suggested reply), optionally filter to intent-positive entries, and POST either JSON or Google Chat text format.
+- `profile_comment_origins` — scrape recent activity comment links for a LinkedIn `/in/` profile or `/company/` page URL and POST the normalized result to a webhook. Extractor supports both direct post anchors (`/feed/update`, `/posts`, `/pulse`) and feed cards exposing only `data-urn`; scrolling also handles LinkedIn finite-scroll "Show more results" button.
+- `profile_comment_intents` — scrape commented posts from a LinkedIn `/in/` profile or `/company/` page URL, run LLM business-intent classification (`YES`/`NO`, lead level, reason, suggested reply), optionally filter to intent-positive entries, and POST either JSON or Google Chat text format.
 
 ## Onboarding (`onboarding.py`)
 
@@ -112,7 +112,7 @@ Three apps in `INSTALLED_APPS`:
 - **`ml/hub.py`** — HuggingFace kit loader (`fetch_kit()`).
 - **`browser/session.py`** — `AccountSession`: linkedin_profile, page, context, browser, playwright. `campaigns` cached_property (list, via Campaign.users M2M). `ensure_browser()` launches/recovers browser. `self_profile` cached_property (re-discovers via Voyager on first access per session — no DB cache; one extra scrape per daemon restart). Cookie expiry check via `_maybe_refresh_cookies()`. `reauthenticate()` forces fresh login (close browser, clear saved cookies, re-launch).
 - **`browser/registry.py`** — `get_or_create_session()`, `get_first_active_profile()`, `resolve_profile()`, `cli_parser()`/`cli_session()` (shared CLI bootstrap for `__main__` scripts).
-- **`browser/login.py`** — `start_browser_session()` — browser launch + LinkedIn login.
+- **`browser/login.py`** — `start_browser_session()` — browser launch + LinkedIn login. `playwright_login()` now short-circuits when LinkedIn redirects to `/feed` at any point in the login flow (already-authenticated session) and raises an explicit checkpoint/challenge error message when redirected to security verification URLs.
 - **`browser/nav.py`** — Navigation, auto-discovery, `goto_page()`.
 - **`db/leads.py`** — Lead CRUD, `get_leads_for_qualification()`, `disqualify_lead()`, `_cache_urn_from_profile()`.
 - **`db/deals.py`** — Deal/state ops, `set_profile_state()`, `increment_connect_attempts()`, `create_freemium_deal()`.
